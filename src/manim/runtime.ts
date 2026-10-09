@@ -70,7 +70,7 @@ function prepareCode(source: string): string {
 function transpileToJavaScript(source: string): string {
 	try {
 		return transform(source, {
-			transforms: ['typescript'],
+			transforms: ['typescript', 'imports'],
 			disableESTransforms: true,
 		}).code;
 	} catch (error) {
@@ -106,15 +106,23 @@ export async function runManimSource(source: string, outputEl: HTMLElement): Pro
 	const code = transpileToJavaScript(prepareCode(source));
 	// Redirect `document.getElementById('container')` to this block's local mount.
 	const documentProxy = createDocumentProxy(mount);
-
+	const exports: { default?: unknown } = {};
 	const executor = new Function(
 		'container',
 		'manimWeb',
 		'document',
 		'window',
 		'self',
+		'exports',
 		`return (async () => {\n${code}\n})();`,
 	);
 
-	await executor(mount, manimWeb, documentProxy, window, window);
+	await executor(mount, manimWeb, documentProxy, window, window, exports);
+	const SceneClass = exports.default as (new (container: HTMLElement) => any) | undefined;
+	if (typeof SceneClass === 'function') {
+		const scene = new SceneClass(mount);
+		if (typeof scene.construct === 'function') {
+			await scene.construct();
+		}
+	}
 }
