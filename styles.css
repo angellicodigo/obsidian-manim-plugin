@@ -44,6 +44,7 @@
 }
 
 .manim-save-state {
+	order: 3;
 	font-size: 11px;
 	color: var(--text-muted);
 	padding: 0 4px;
@@ -70,6 +71,7 @@
 }
 
 .manim-run-button {
+	order: 1;
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -82,15 +84,40 @@
 	background: var(--background-modifier-hover);
 }
 
-.manim-run-button .svg-icon {
+.manim-run-button .svg-icon,
+.manim-button-icon .svg-icon {
 	width: 14px;
 	height: 14px;
+}
+
+.manim-button-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .manim-run-label {
 	line-height: 1;
 }
 
+.manim-restart-button {
+	order: 2;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 2px 7px;
+	background: var(--background-secondary-alt);
+	color: var(--text-normal);
+}
+
+.manim-restart-button:hover:not(:disabled) {
+	background: var(--background-modifier-hover);
+}
+
+.manim-restart-button .svg-icon {
+	width: 14px;
+	height: 14px;
+}
 
 .manim-code-editor {
 	margin: 8px;

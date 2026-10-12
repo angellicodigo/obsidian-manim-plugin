@@ -97,7 +97,20 @@ function createDocumentProxy(container: HTMLElement): Document {
 	}) as Document;
 }
 
-export async function runManimSource(source: string, outputEl: HTMLElement): Promise<void> {
+export interface ConstructableScene {
+	construct?: () => Promise<void> | void;
+	pause?: () => void;
+	resume?: () => void;
+	stop?: () => void;
+	dispose?: () => void;
+	isPlaying?: boolean;
+}
+
+export async function runManimSource(
+	source: string,
+	outputEl: HTMLElement,
+	onSceneReady?: (scene: ConstructableScene) => void,
+): Promise<ConstructableScene | null> {
 	outputEl.empty();
 
 	const viewport = outputEl.createDiv({ cls: 'manim-canvas-viewport' });
@@ -118,11 +131,14 @@ export async function runManimSource(source: string, outputEl: HTMLElement): Pro
 	);
 
 	await executor(mount, manimWeb, documentProxy, window, window, exports);
-	const SceneClass = exports.default as (new (container: HTMLElement) => any) | undefined;
+	const SceneClass = exports.default as (new (container: HTMLElement) => ConstructableScene) | undefined;
 	if (typeof SceneClass === 'function') {
 		const scene = new SceneClass(mount);
+		onSceneReady?.(scene);
 		if (typeof scene.construct === 'function') {
 			await scene.construct();
 		}
+		return scene;
 	}
+	return null;
 }
