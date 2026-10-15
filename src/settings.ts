@@ -38,6 +38,7 @@ export class SampleSettingTab extends PluginSettingTab {
 				.onChange(async (value: ManimEditorTheme) => {
 					this.plugin.settings.editorTheme = value;
 					await this.plugin.saveSettings();
+					this.plugin.updateAllEditorThemes(value);
 				}));
 
 		new Setting(containerEl)

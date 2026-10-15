@@ -1,7 +1,7 @@
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
 import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap } from '@codemirror/view';
 import { MarkdownPostProcessorContext, MarkdownRenderChild, Plugin } from 'obsidian';
 import { manimEditorTheme } from './editorStyle';
@@ -13,6 +13,7 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 	private editorView: EditorView | null = null;
 	private saveTimer: number | null = null;
 	private hideSavedTimer: number | null = null;
+	private themeCompartment = new Compartment();
 
 	constructor(
 		private readonly plugin: Plugin,
@@ -34,14 +35,13 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 				drawSelection(),
 				highlightActiveLine(),
 				manimEditorTheme,
-				getEditorThemeExtension(this.theme),
+				this.themeCompartment.of(getEditorThemeExtension(this.theme)),
 				syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 				javascript({ typescript: true }),
 				EditorView.lineWrapping,
-				EditorState.tabSize.of(2),
-				indentUnit.of('  '),
-				// Use default keymap without indentWithTab to avoid cursor/delete issues at line start
-				keymap.of([...defaultKeymap, ...historyKeymap]),
+				EditorState.tabSize.of(4),
+				indentUnit.of('    '),
+				keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
 				EditorView.updateListener.of((update) => {
 					if (update.docChanged) {
 						this.scheduleSave();
@@ -55,9 +55,11 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 			parent: this.editorHostEl,
 		});
 		this.editorView.dom.classList.add('cm-s-obsidian');
+		(this.plugin as any).registerActiveEditor?.(this);
 	}
 
 	onunload(): void {
+		(this.plugin as any).unregisterActiveEditor?.(this);
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 		}
@@ -66,6 +68,14 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 		}
 		this.editorView?.destroy();
 		this.editorView = null;
+	}
+
+	setEditorTheme(newTheme: ManimEditorTheme): void {
+		if (this.editorView) {
+			this.editorView.dispatch({
+				effects: this.themeCompartment.reconfigure(getEditorThemeExtension(newTheme)),
+			});
+		}
 	}
 
 	getCode(): string {

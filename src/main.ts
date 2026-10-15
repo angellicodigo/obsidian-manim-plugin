@@ -1,9 +1,32 @@
 import { Plugin } from 'obsidian';
 import { registerManimCodeBlockProcessor } from './manim/codeBlockProcessor';
-import { DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab } from './settings';
+import { DEFAULT_SETTINGS, ManimEditorTheme, MyPluginSettings, SampleSettingTab } from './settings';
+
+export interface ThemeableEditor {
+	setEditorTheme(newTheme: ManimEditorTheme): void;
+}
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
+	private activeEditors = new Set<ThemeableEditor>();
+
+	registerActiveEditor(editor: ThemeableEditor) {
+		this.activeEditors.add(editor);
+	}
+
+	unregisterActiveEditor(editor: ThemeableEditor) {
+		this.activeEditors.delete(editor);
+	}
+
+	updateAllEditorThemes(newTheme: ManimEditorTheme) {
+		for (const editor of this.activeEditors) {
+			try {
+				editor.setEditorTheme(newTheme);
+			} catch (err) {
+				console.error('Failed to update editor theme', err);
+			}
+		}
+	}
 
 	async onload() {
 		await this.loadSettings();
@@ -15,6 +38,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.activeEditors.clear();
 	}
 
 	async loadSettings() {

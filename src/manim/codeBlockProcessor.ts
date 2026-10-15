@@ -96,6 +96,17 @@ export function registerManimCodeBlockProcessor(plugin: MyPlugin): void {
 		let isPaused = false;
 		let lastRanCode = '';
 
+		editorChild.register(() => {
+			if (currentScene) {
+				try {
+					currentScene.dispose?.();
+				} catch {
+					// ignore cleanup errors
+				}
+				currentScene = null;
+			}
+		});
+
 		const setButtonState = (state: 'run' | 'pause') => {
 			if (state === 'pause') {
 				setIcon(runIcon, 'pause');
@@ -181,6 +192,8 @@ export function registerManimCodeBlockProcessor(plugin: MyPlugin): void {
 				isPaused = true;
 				isRunning = false;
 				setButtonState('run');
+				saveState.textContent = 'Paused';
+				saveState.style.display = 'inline-block';
 				return;
 			}
 
@@ -191,6 +204,8 @@ export function registerManimCodeBlockProcessor(plugin: MyPlugin): void {
 						isPaused = false;
 						isRunning = true;
 						setButtonState('pause');
+						saveState.textContent = 'Running...';
+						saveState.style.display = 'inline-block';
 						return;
 					} catch {
 						// fallback to re-running if resume fails

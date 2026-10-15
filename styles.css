@@ -120,13 +120,19 @@
 }
 
 .manim-code-editor {
-	margin: 8px;
-	background: var(--code-background, var(--background-primary));
+	margin: 8px 0;
+	background: var(--code-background, var(--background-primary)) !important;
+	background-color: var(--code-background, var(--background-primary)) !important;
+	background-image: none !important;
+	border-radius: var(--code-radius, 6px);
+	border: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
 	overflow: hidden;
 }
 
 .manim-code-editor .cm-editor {
-	background: var(--code-background, var(--background-primary));
+	background: var(--code-background, var(--background-primary)) !important;
+	background-color: var(--code-background, var(--background-primary)) !important;
+	background-image: none !important;
 	color: var(--code-normal, var(--text-normal));
 	font-family: var(--manim-code-font-family, var(--font-monospace));
 	font-size: var(--manim-code-font-size, var(--code-size, 0.9em));
@@ -139,11 +145,14 @@
 	min-height: 220px;
 	max-height: 320px;
 	overflow: auto;
+	background: var(--code-background, var(--background-primary)) !important;
+	background-color: var(--code-background, var(--background-primary)) !important;
+	background-image: none !important;
 }
 
 .manim-code-editor .cm-content {
 	padding: var(--size-4-2, 8px) var(--size-4-4, 12px);
-	tab-size: 2;
+	tab-size: 4 !important;
 }
 
 .manim-code-editor .cm-focused {
@@ -151,18 +160,26 @@
 }
 
 .manim-code-editor .cm-cursor,
-.manim-code-editor .cm-cursor-primary {
-	border-left-color: var(--cursor-color, var(--text-normal)) !important;
-	border-left-width: 2px !important;
-	display: block !important;
-	height: 1em !important;
+.manim-code-editor .cm-cursor-primary,
+.manim-code-editor .cm-dropCursor {
+	border-left: 1px solid #ffffff !important;
+	border-left-width: 1px !important;
+	border-left-color: #ffffff !important;
 	z-index: 10 !important;
-	opacity: 1 !important;
 }
 
-.manim-code-editor .cm-activeLine,
+.manim-code-editor .cm-content {
+	padding: var(--size-4-2, 8px) var(--size-4-4, 12px);
+	tab-size: 4 !important;
+	caret-color: #ffffff !important;
+}
+
+.manim-code-editor .cm-activeLine {
+	background-color: var(--cursor-line-background, rgba(255, 255, 255, 0.06)) !important;
+}
+
 .manim-code-editor .cm-activeLineGutter {
-	background: transparent;
+	background-color: var(--cursor-line-background, rgba(255, 255, 255, 0.06)) !important;
 }
 
 .manim-code-editor .cm-selectionBackground,
