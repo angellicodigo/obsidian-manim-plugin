@@ -134,11 +134,20 @@
 	background-color: var(--code-background, var(--background-primary)) !important;
 	background-image: none !important;
 	color: var(--code-normal, var(--text-normal));
-	font-family: var(--manim-code-font-family, var(--font-monospace));
-	font-size: var(--manim-code-font-size, var(--code-size, 0.9em));
-	line-height: var(--manim-code-line-height, var(--line-height-normal, 1.5));
-	letter-spacing: var(--manim-code-letter-spacing, normal);
-	font-weight: var(--manim-code-font-weight, 400);
+}
+
+.manim-code-editor .cm-editor,
+.manim-code-editor .cm-content,
+.manim-code-editor .cm-line {
+	font-family: var(--manim-code-font-family, var(--font-monospace)) !important;
+	font-size: var(--manim-code-font-size, var(--code-size, 0.9em)) !important;
+	line-height: var(--manim-code-line-height, var(--line-height-normal, 1.5)) !important;
+	letter-spacing: var(--manim-code-letter-spacing, normal) !important;
+	font-weight: var(--manim-code-font-weight, 400) !important;
+}
+
+.manim-code-editor .cm-line {
+	padding: 0 2px 0 6px !important;
 }
 
 .manim-code-editor .cm-scroller {
@@ -151,28 +160,58 @@
 }
 
 .manim-code-editor .cm-content {
-	padding: var(--size-4-2, 8px) var(--size-4-4, 12px);
+	padding: var(--size-4-2, 8px) var(--size-4-4, 12px) !important;
 	tab-size: 4 !important;
+	caret-color: #ffffff !important;
 }
 
 .manim-code-editor .cm-focused {
 	outline: none;
 }
 
-.manim-code-editor .cm-cursor,
-.manim-code-editor .cm-cursor-primary,
-.manim-code-editor .cm-dropCursor {
-	border-left: 1px solid #ffffff !important;
-	border-left-width: 1px !important;
-	border-left-color: #ffffff !important;
-	z-index: 10 !important;
+.manim-code-editor {
+	--manim-vim-cursor-color: #f10707;
 }
 
-.manim-code-editor .cm-content {
-	padding: var(--size-4-2, 8px) var(--size-4-4, 12px);
-	tab-size: 4 !important;
-	caret-color: #ffffff !important;
+.manim-code-editor .cm-fat-cursor,
+.manim-code-editor .cm-editor .cm-fat-cursor,
+.manim-code-editor .cm-editor:not(.cm-focused) .cm-fat-cursor,
+.manim-code-editor:not(.cm-focused) .cm-fat-cursor {
+	position: absolute;
+	background: var(--manim-vim-cursor-color, #f10707) !important;
+	background-color: var(--manim-vim-cursor-color, #f10707) !important;
+	border: none !important;
+	border-left: none !important;
+	outline: none !important;
+	white-space: pre;
+	z-index: 10 !important;
+	color: transparent !important;
+	opacity: 0.50 !important;
 }
+
+/* Force standard cursorLayer to display in Insert Mode even if the outer note has .cm-vimMode */
+.manim-code-editor .cm-scroller:not(.cm-vimMode) .cm-cursorLayer:not(.cm-vimCursorLayer),
+.manim-code-editor .cm-scroller:not(.cm-vimMode) > .cm-cursorLayer {
+	display: block !important;
+}
+
+/* Hide standard cursorLayer only when OUR editor is in Vim Normal Mode */
+.manim-code-editor .cm-scroller.cm-vimMode .cm-cursorLayer:not(.cm-vimCursorLayer) {
+	display: none !important;
+}
+
+/* White cursor line in Insert Mode */
+.manim-code-editor .cm-editor.cm-focused .cm-scroller:not(.cm-vimMode) .cm-cursor,
+.manim-code-editor .cm-cursor:not(.cm-fat-cursor),
+.manim-code-editor .cm-dropCursor {
+	display: block !important;
+	border-left: 2px solid #ffffff !important;
+	border-left-width: 2px !important;
+	border-left-color: #ffffff !important;
+	z-index: 10 !important;
+	opacity: 1 !important;
+}
+
 
 .manim-code-editor .cm-activeLine {
 	background-color: var(--cursor-line-background, rgba(255, 255, 255, 0.06)) !important;

@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, ManimEditorTheme, MyPluginSettings, SampleSettingTab 
 
 export interface ThemeableEditor {
 	setEditorTheme(newTheme: ManimEditorTheme): void;
+	setVimEnabled?(enabled: boolean): void;
 }
 
 export default class MyPlugin extends Plugin {
@@ -28,11 +29,28 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
+	updateAllEditorVim(enabled: boolean) {
+		for (const editor of this.activeEditors) {
+			try {
+				editor.setVimEnabled?.(enabled);
+			} catch (err) {
+				console.error('Failed to update editor vim mode', err);
+			}
+		}
+	}
+
 	async onload() {
 		await this.loadSettings();
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
+
+		this.registerEvent(
+			(this.app.vault as any).on('config-changed', () => {
+				const isVim = Boolean((this.app.vault as any).getConfig('vimMode'));
+				this.updateAllEditorVim(isVim);
+			})
+		);
 
 		registerManimCodeBlockProcessor(this);
 	}

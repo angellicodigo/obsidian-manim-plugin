@@ -11,10 +11,23 @@ export const manimEditorTheme = EditorView.theme({
 	'.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
 		backgroundColor: 'var(--manim-selection-color, var(--text-selection)) !important',
 	},
-	'.cm-cursor, .cm-dropCursor': {
-		borderLeft: '1px solid #ffffff !important',
+	'.cm-fat-cursor, &:not(.cm-focused) .cm-fat-cursor, &.cm-focused .cm-fat-cursor': {
+		position: 'absolute',
+		backgroundColor: 'var(--manim-vim-cursor-color, #8b0000) !important',
+		border: 'none !important',
+		borderLeft: 'none !important',
+		outline: 'none !important',
+		whiteSpace: 'pre',
+		zIndex: '10 !important',
+		color: 'transparent !important',
+		opacity: '0.85 !important',
+	},
+	'.cm-cursor:not(.cm-fat-cursor), .cm-dropCursor': {
+		borderLeft: '2px solid #ffffff !important',
 		borderLeftColor: '#ffffff !important',
-		borderLeftWidth: '1px !important',
+		borderLeftWidth: '2px !important',
+		zIndex: '10 !important',
+		opacity: '1 !important',
 	},
 });
 

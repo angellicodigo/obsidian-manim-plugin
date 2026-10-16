@@ -1,19 +1,32 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
 import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorState } from '@codemirror/state';
+import { Compartment, EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap } from '@codemirror/view';
+import { vim } from '@replit/codemirror-vim';
 import { MarkdownPostProcessorContext, MarkdownRenderChild, Plugin } from 'obsidian';
 import { manimEditorTheme } from './editorStyle';
 import { getEditorThemeExtension } from './editorThemes';
 import { persistManimCode } from './sourcePersistence';
 import { ManimEditorTheme } from '../settings';
 
+function isVimEnabled(plugin: Plugin): boolean {
+	const app = plugin.app as any;
+	if (typeof app?.vault?.getConfig === 'function') {
+		return Boolean(app.vault.getConfig('vimMode'));
+	}
+	if (typeof app?.isVimEnabled === 'function') {
+		return Boolean(app.isVimEnabled());
+	}
+	return Boolean((window as any)?.CodeMirrorAdapter?.Vim);
+}
+
 export class ManimCodeEditorChild extends MarkdownRenderChild {
 	private editorView: EditorView | null = null;
 	private saveTimer: number | null = null;
 	private hideSavedTimer: number | null = null;
 	private themeCompartment = new Compartment();
+	private vimCompartment = new Compartment();
 
 	constructor(
 		private readonly plugin: Plugin,
@@ -28,26 +41,31 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 	}
 
 	onload(): void {
+		const vimActive = isVimEnabled(this.plugin);
+
+		const extensions: Extension[] = [
+			this.vimCompartment.of(vimActive ? vim() : []),
+			history(),
+			drawSelection(),
+			highlightActiveLine(),
+			manimEditorTheme,
+			this.themeCompartment.of(getEditorThemeExtension(this.theme)),
+			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+			javascript({ typescript: true }),
+			EditorView.lineWrapping,
+			EditorState.tabSize.of(4),
+			indentUnit.of('    '),
+			keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+			EditorView.updateListener.of((update) => {
+				if (update.docChanged) {
+					this.scheduleSave();
+				}
+			}),
+		];
+
 		const state = EditorState.create({
 			doc: this.initialSource,
-			extensions: [
-				history(),
-				drawSelection(),
-				highlightActiveLine(),
-				manimEditorTheme,
-				this.themeCompartment.of(getEditorThemeExtension(this.theme)),
-				syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-				javascript({ typescript: true }),
-				EditorView.lineWrapping,
-				EditorState.tabSize.of(4),
-				indentUnit.of('    '),
-				keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
-				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
-						this.scheduleSave();
-					}
-				}),
-			],
+			extensions,
 		});
 
 		this.editorView = new EditorView({
@@ -55,6 +73,13 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 			parent: this.editorHostEl,
 		});
 		this.editorView.dom.classList.add('cm-s-obsidian');
+
+		this.plugin.registerDomEvent(this.editorHostEl, 'pointerdown', () => {
+			if (this.editorView && !this.editorView.hasFocus) {
+				this.editorView.focus();
+			}
+		});
+
 		(this.plugin as any).registerActiveEditor?.(this);
 	}
 
@@ -74,6 +99,14 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 		if (this.editorView) {
 			this.editorView.dispatch({
 				effects: this.themeCompartment.reconfigure(getEditorThemeExtension(newTheme)),
+			});
+		}
+	}
+
+	setVimEnabled(enabled: boolean): void {
+		if (this.editorView) {
+			this.editorView.dispatch({
+				effects: this.vimCompartment.reconfigure(enabled ? vim() : []),
 			});
 		}
 	}
