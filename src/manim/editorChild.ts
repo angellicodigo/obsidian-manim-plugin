@@ -82,6 +82,10 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 		return this.editorView?.state.doc.toString() ?? this.initialSource;
 	}
 
+	requestMeasure(): void {
+		this.editorView?.requestMeasure();
+	}
+
 	async flushPendingSave(): Promise<void> {
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);

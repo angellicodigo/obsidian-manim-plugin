@@ -24,7 +24,10 @@ export function registerManimCodeBlockProcessor(plugin: MyPlugin): void {
 		syncStylesFromNativeCodeMirror(wrapper);
 
 		const header = wrapper.createDiv({ cls: 'manim-block-header' });
-		const collapseCaret = header.createSpan({ cls: 'manim-collapse-caret', text: '▾' });
+		const collapseCaret = header.createSpan({
+			cls: 'manim-collapse-caret',
+			text: (plugin.settings.defaultCollapsed ?? false) ? '▸' : '▾',
+		});
 		collapseCaret.setAttribute('role', 'button');
 		collapseCaret.setAttribute('tabindex', '0');
 
@@ -60,12 +63,15 @@ export function registerManimCodeBlockProcessor(plugin: MyPlugin): void {
 		const errorPanel = wrapper.createEl('pre', { cls: 'manim-error-panel' });
 		errorPanel.style.display = 'none';
 
-		let isCollapsed = false;
+		let isCollapsed = plugin.settings.defaultCollapsed ?? false;
 		setCollapsedState(codeEditor, collapseCaret, isCollapsed);
 
 		const toggleCollapse = () => {
 			isCollapsed = !isCollapsed;
 			setCollapsedState(codeEditor, collapseCaret, isCollapsed);
+			if (!isCollapsed) {
+				editorChild.requestMeasure();
+			}
 		};
 
 		plugin.registerDomEvent(collapseCaret, 'click', (evt: MouseEvent) => {

@@ -6,11 +6,13 @@ export type ManimEditorTheme = 'obsidian' | 'github-light' | 'github-dark' | 'on
 export interface MyPluginSettings {
 	editorTheme: ManimEditorTheme;
 	autoSaveDelaySeconds: number;
+	defaultCollapsed: boolean;
 }
 
 export const DEFAULT_SETTINGS: MyPluginSettings = {
 	editorTheme: 'obsidian',
 	autoSaveDelaySeconds: 60,
+	defaultCollapsed: false,
 }
 
 export class SampleSettingTab extends PluginSettingTab {
@@ -53,6 +55,16 @@ export class SampleSettingTab extends PluginSettingTab {
 						this.plugin.settings.autoSaveDelaySeconds = numValue;
 						await this.plugin.saveSettings();
 					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Collapse code by default')
+			.setDesc('Choose whether to have the embedded manim editor to be expanded or collapsed when opening a .md file.')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.defaultCollapsed)
+				.onChange(async (value: boolean) => {
+					this.plugin.settings.defaultCollapsed = value;
+					await this.plugin.saveSettings();
 				}));
 	}
 }
