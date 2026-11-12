@@ -4,6 +4,7 @@ import { ManimCodeEditorChild } from './editorChild';
 import { syncStylesFromNativeCodeMirror } from './editorStyle';
 import { runManimSource, type ConstructableScene, type SceneStateChange } from './runtime';
 import { getPersistedBlockState, saveBlockState } from './stateStore';
+import type { Diagnostic } from '@codemirror/lint';
 
 type RunState = 'idle' | 'running' | 'paused';
 
@@ -13,6 +14,18 @@ function formatRuntimeError(error: unknown): string {
 		return stack ? `${error.name}: ${error.message}\n\n${stack}` : `${error.name}: ${error.message}`;
 	}
 	return String(error);
+}
+
+/** Build a CodeMirror diagnostic from a runtime error. Uses character offset 0 on line 0;
+ * the line number (if extracted) is included in the message. */
+function errorToDiagnostic(error: unknown): Diagnostic | null {
+	const message = error instanceof Error ? error.message : String(error);
+	return {
+		from: 0,
+		to: Math.max(1, message.length),
+		message,
+		severity: 'error',
+	};
 }
 
 function toRunState(state: SceneStateChange): RunState {
@@ -167,8 +180,9 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 			const codeToRun = editorChild.getCode();
 			lastRanCode = codeToRun;
 
-			// Ensure state reflects that the user was actively running/viewing the code
-			editorChild.recordCurrentState(false);
+			// Record cursor/scroll/focus without forcing collapsed state (that
+			// only changes when the user toggles the caret).
+			editorChild.recordCurrentState();
 
 			try {
 				await editorChild.flushPendingSave();
@@ -200,12 +214,15 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 				if (typeof currentScene?.onStateChange !== 'function') {
 					setRunState('idle');
 				}
+				editorChild.setLintErrors([]);
 			} catch (error) {
 				if (isStale()) {
 					return;
 				}
 				unsubscribeScene();
 				showError(formatRuntimeError(error));
+				const diagnostic = errorToDiagnostic(error);
+				if (diagnostic) editorChild.setLintErrors([diagnostic]);
 				new Notice(`Manim render failed: ${error instanceof Error ? error.message : String(error)}`);
 				setRunState('idle');
 			}
@@ -248,6 +265,22 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 			void execute();
 		});
 
-		void execute();
+		// Auto-run on open, honoring the user's auto-run setting.
+		if (plugin.settings.autoRun === 'always') {
+			void execute();
+		} else if (plugin.settings.autoRun === 'visible') {
+			// Only run when the block scrolled into view; stop observing after first run.
+			const observer = new IntersectionObserver((entries) => {
+				for (const entry of entries) {
+					if (entry.isIntersecting) {
+						observer.disconnect();
+						void execute();
+						return;
+					}
+				}
+			}, { root: null, rootMargin: '0px', threshold: 0 });
+			observer.observe(wrapper);
+		}
+		// 'never': do nothing; user clicks Run explicitly.
 	});
 }

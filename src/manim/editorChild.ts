@@ -4,6 +4,7 @@ import { javascript } from '@codemirror/lang-javascript';
 import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap } from '@codemirror/view';
+import { linter, type Diagnostic } from '@codemirror/lint';
 import { vim } from '@replit/codemirror-vim';
 import { MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian';
 import type ManimPlugin from '../main';
@@ -33,6 +34,8 @@ export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEd
 	private hideSavedTimer: number | null = null;
 	private readonly themeCompartment = new Compartment();
 	private readonly vimCompartment = new Compartment();
+	private readonly lintCompartment = new Compartment();
+	private lintDiagnostics: Diagnostic[] = [];
 
 	constructor(
 		private readonly plugin: ManimPlugin,
@@ -62,6 +65,17 @@ export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEd
 			closeBrackets(),
 			manimEditorTheme,
 			this.themeCompartment.of(getEditorThemeExtension(this.theme)),
+			this.lintCompartment.of(linter((view) => {
+				// Map stored diagnostics (by line) to current document character offsets.
+				const result: Diagnostic[] = [];
+				for (const d of this.lintDiagnostics) {
+					try {
+						const line = view.state.doc.line(Math.min(d.from, view.state.doc.lines - 1));
+						result.push({ ...d, from: line.from, to: line.from + (d.to - d.from) });
+					} catch { result.push(d); }
+				}
+				return result;
+			})),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			javascript({ typescript: true }),
 			EditorView.lineWrapping,
@@ -172,6 +186,22 @@ export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEd
 	setEditorFontSize(px: number): void {
 		this.editorHostEl.style.setProperty('--manim-code-font-size', `${px}px`);
 		this.editorView?.requestMeasure();
+	}
+
+	setLintErrors(diagnostics: Diagnostic[]): void {
+		this.lintDiagnostics = diagnostics;
+		this.editorView?.dispatch({
+			effects: this.lintCompartment.reconfigure(linter((view) => {
+				const result: Diagnostic[] = [];
+				for (const d of this.lintDiagnostics) {
+					try {
+						const line = view.state.doc.line(Math.min(d.from, view.state.doc.lines - 1));
+						result.push({ ...d, from: line.from, to: Math.min(line.from + (d.to - d.from), view.state.doc.length) });
+					} catch { result.push(d); }
+				}
+				return result;
+			})),
+		});
 	}
 
 	getCode(): string {

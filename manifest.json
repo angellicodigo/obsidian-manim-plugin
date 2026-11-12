@@ -4,10 +4,10 @@
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Create and edit Manim animations directly in your notes with a live editor, syntax highlighting, and auto-save.",
-	"author": "Hpn4",
-	"authorUrl": "https://github.com/Hpn4",
+	"author": "angellicodigo",
+	"authorUrl": "https://github.com/angellicodigo",
 	"fundingUrl": {
-		"GitHub": "https://github.com/sponsors/Hpn4"
+		"GitHub": "https://github.com/angellicodigo/obsidian-manim-plugin"
 	},
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }

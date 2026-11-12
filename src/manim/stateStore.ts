@@ -11,8 +11,7 @@ export interface BlockState {
 // Map from unique block key to its state
 const blockStateCache = new Map<string, BlockState>();
 
-// Map from file path to the most recently active block state in that file
-const lastActiveBlockByFile = new Map<string, BlockState>();
+// lastActiveBlockByFile removed: no cross-block fallback. State is keyed per block only.
 
 export function getBlockKey(ctx: MarkdownPostProcessorContext, el: HTMLElement): string {
 	const sectionInfo = ctx.getSectionInfo(el);
@@ -40,7 +39,6 @@ export function saveBlockState(
 	};
 
 	blockStateCache.set(key, merged);
-	lastActiveBlockByFile.set(ctx.sourcePath, merged);
 }
 
 export function getPersistedBlockState(
@@ -48,16 +46,5 @@ export function getPersistedBlockState(
 	el: HTMLElement,
 ): BlockState | undefined {
 	const key = getBlockKey(ctx, el);
-	const state = blockStateCache.get(key);
-	if (state !== undefined) {
-		return state;
-	}
-
-	// Fallback: if sectionInfo wasn't available or line shifted slightly, check if there's a recent active block in the same file (within last 30 seconds)
-	const recent = lastActiveBlockByFile.get(ctx.sourcePath);
-	if (recent && Date.now() - recent.timestamp < 30000) {
-		return recent;
-	}
-
-	return undefined;
+	return blockStateCache.get(key);
 }

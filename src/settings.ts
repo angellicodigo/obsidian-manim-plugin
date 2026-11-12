@@ -5,6 +5,8 @@ export type ManimEditorTheme = 'obsidian' | 'github-light' | 'github-dark' | 'on
 
 export type ManimEditorFont = 'JetBrains Mono' | 'Monospace' | 'Fira Code' | 'Lucida Console' | 'Consolas';
 
+export type AutoRunMode = 'always' | 'visible' | 'never';
+
 export const MIN_FONT_SIZE = 8;
 export const MAX_FONT_SIZE = 40;
 const MIN_AUTOSAVE_DELAY = 1;
@@ -16,14 +18,16 @@ export interface ManimPluginSettings {
 	editorFontSize: number;
 	autoSaveDelaySeconds: number;
 	defaultCollapsed: boolean;
+	autoRun: AutoRunMode;
 }
 
 export const DEFAULT_SETTINGS: ManimPluginSettings = {
 	editorTheme: 'obsidian',
 	editorFontFamily: 'JetBrains Mono',
 	editorFontSize: 14,
-	autoSaveDelaySeconds: 60,
+	autoSaveDelaySeconds: 5,
 	defaultCollapsed: false,
+	autoRun: 'never',
 };
 
 const THEME_OPTIONS: Record<ManimEditorTheme, string> = {
@@ -127,6 +131,19 @@ export class ManimSettingTab extends PluginSettingTab {
 				.setValue(settings.defaultCollapsed)
 				.onChange(async (value) => {
 					settings.defaultCollapsed = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Auto-run on open')
+			.setDesc('Whether to automatically run manim blocks when opening a note. "visible" only runs blocks currently in the viewport.')
+			.addDropdown((dropdown) => dropdown
+				.addOption('always', 'Always')
+				.addOption('visible', 'When visible')
+				.addOption('never', 'Never')
+				.setValue(settings.autoRun)
+				.onChange(async (value) => {
+					settings.autoRun = value as AutoRunMode;
 					await this.plugin.saveSettings();
 				}));
 	}
