@@ -139,3 +139,5 @@ Built with:
 - [ ] **Demo screenshots & GIFs** showcasing editor, rendering, and themes
 - [ ] Improved cursor handling in code editor
 - [ ] Export animations to HTML/MP4
+
+quick test
