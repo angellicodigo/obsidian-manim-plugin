@@ -5,15 +5,18 @@ import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from '@codemirr
 import { Compartment, EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap } from '@codemirror/view';
 import { vim } from '@replit/codemirror-vim';
-import { MarkdownPostProcessorContext, MarkdownRenderChild, Plugin } from 'obsidian';
-import { manimEditorTheme } from './editorStyle';
+import { MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian';
+import type ManimPlugin from '../main';
+import type { ManimEditor } from '../main';
+import type { ManimEditorFont, ManimEditorTheme } from '../settings';
+import { buildFontStack, manimEditorTheme } from './editorStyle';
 import { getEditorThemeExtension } from './editorThemes';
 import { persistManimCode } from './sourcePersistence';
-import { ManimEditorTheme } from '../settings';
 import { BlockState, saveBlockState } from './stateStore';
-import type { ManimEditorFont } from '../settings';
 
-function isVimEnabled(plugin: Plugin): boolean {
+const SAVED_INDICATOR_MS = 1000;
+
+function isVimEnabled(plugin: ManimPlugin): boolean {
 	const app = plugin.app as any;
 	if (typeof app?.vault?.getConfig === 'function') {
 		return Boolean(app.vault.getConfig('vimMode'));
@@ -24,16 +27,15 @@ function isVimEnabled(plugin: Plugin): boolean {
 	return Boolean((window as any)?.CodeMirrorAdapter?.Vim);
 }
 
-export class ManimCodeEditorChild extends MarkdownRenderChild {
+export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEditor {
 	private editorView: EditorView | null = null;
 	private saveTimer: number | null = null;
 	private hideSavedTimer: number | null = null;
-	private themeCompartment = new Compartment();
-	private fontCompartment = new Compartment();
-	private vimCompartment = new Compartment();
+	private readonly themeCompartment = new Compartment();
+	private readonly vimCompartment = new Compartment();
 
 	constructor(
-		private readonly plugin: Plugin,
+		private readonly plugin: ManimPlugin,
 		private readonly ctx: MarkdownPostProcessorContext,
 		private readonly contextEl: HTMLElement,
 		private readonly editorHostEl: HTMLElement,
@@ -46,21 +48,20 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 	}
 
 	onload(): void {
-		const vimActive = isVimEnabled(this.plugin);
+		const { settings } = this.plugin;
+
+		// Font family/size are CSS variables on the host element, consumed by styles.css.
+		this.setEditorFontFamily(settings.editorFontFamily);
+		this.setEditorFontSize(settings.editorFontSize);
 
 		const extensions: Extension[] = [
-			this.vimCompartment.of(vimActive ? vim() : []),
+			this.vimCompartment.of(isVimEnabled(this.plugin) ? vim() : []),
 			history(),
 			drawSelection(),
 			highlightActiveLine(),
 			closeBrackets(),
 			manimEditorTheme,
 			this.themeCompartment.of(getEditorThemeExtension(this.theme)),
-			this.fontCompartment.of(EditorView.theme({
-				'.cm-content': {
-					fontFamily: `'${(this.plugin as any).settings.editorFontFamily ?? 'JetBrains Mono'}', var(--font-monospace)`,
-				},
-			})),
 			syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
 			javascript({ typescript: true }),
 			EditorView.lineWrapping,
@@ -77,66 +78,58 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 			}),
 		];
 
-		let initialSelection = undefined;
-		if (this.savedState?.cursor) {
-			const maxPos = this.initialSource.length;
-			const anchor = Math.max(0, Math.min(this.savedState.cursor.anchor, maxPos));
-			const head = Math.max(0, Math.min(this.savedState.cursor.head, maxPos));
-			initialSelection = { anchor, head };
-		}
-
-		const state = EditorState.create({
-			doc: this.initialSource,
-			selection: initialSelection,
-			extensions,
-		});
+		const maxPos = this.initialSource.length;
+		const clampPos = (pos: number) => Math.max(0, Math.min(pos, maxPos));
+		const cursor = this.savedState?.cursor;
 
 		this.editorView = new EditorView({
-			state,
+			state: EditorState.create({
+				doc: this.initialSource,
+				selection: cursor ? { anchor: clampPos(cursor.anchor), head: clampPos(cursor.head) } : undefined,
+				extensions,
+			}),
 			parent: this.editorHostEl,
 		});
 		this.editorView.dom.classList.add('cm-s-obsidian');
 
-		// Apply initial font family from settings
-		this.setEditorFontFamily((this.plugin as any).settings.editorFontFamily ?? 'JetBrains Mono');
+		this.registerDomEvent(this.editorView.scrollDOM, 'scroll', () => this.recordCurrentState(), { passive: true });
 
-		this.editorView.scrollDOM.addEventListener('scroll', () => {
-			this.recordCurrentState();
-		}, { passive: true });
-
-		if (this.savedState?.scroll) {
-			const { top, left } = this.savedState.scroll;
+		const scroll = this.savedState?.scroll;
+		const hadFocus = this.savedState?.hadFocus;
+		if (scroll || hadFocus) {
 			requestAnimationFrame(() => {
-				if (this.editorView) {
-					this.editorView.scrollDOM.scrollTop = top;
-					this.editorView.scrollDOM.scrollLeft = left;
+				const view = this.editorView;
+				if (!view) {
+					return;
+				}
+				if (scroll) {
+					view.scrollDOM.scrollTop = scroll.top;
+					view.scrollDOM.scrollLeft = scroll.left;
+				}
+				if (hadFocus && !view.hasFocus) {
+					view.focus();
 				}
 			});
 		}
 
-		if (this.savedState?.hadFocus) {
-			requestAnimationFrame(() => {
-				if (this.editorView && !this.editorView.hasFocus) {
-					this.editorView.focus();
-				}
-			});
-		}
-
-		this.plugin.registerDomEvent(this.editorHostEl, 'pointerdown', () => {
+		this.registerDomEvent(this.editorHostEl, 'pointerdown', () => {
 			if (this.editorView && !this.editorView.hasFocus) {
 				this.editorView.focus();
 			}
 			this.recordCurrentState();
 		});
 
-		(this.plugin as any).registerActiveEditor?.(this);
+		this.plugin.registerActiveEditor(this);
 	}
 
 	onunload(): void {
 		this.recordCurrentState();
-		(this.plugin as any).unregisterActiveEditor?.(this);
+		this.plugin.unregisterActiveEditor(this);
 		if (this.saveTimer !== null) {
+			// Don't lose edits that were still waiting for the auto-save delay (best effort).
 			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+			void this.persistChanges();
 		}
 		if (this.hideSavedTimer !== null) {
 			window.clearTimeout(this.hideSavedTimer);
@@ -148,49 +141,37 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 	recordCurrentState(forceCollapsed?: boolean): void {
 		if (!this.editorView) return;
 		const sel = this.editorView.state.selection.main;
-		const scroll = {
-			top: this.editorView.scrollDOM.scrollTop,
-			left: this.editorView.scrollDOM.scrollLeft,
-		};
-		const hadFocus = this.editorView.hasFocus;
 		saveBlockState(this.ctx, this.contextEl, {
 			cursor: { anchor: sel.anchor, head: sel.head },
-			scroll,
-			hadFocus,
+			scroll: {
+				top: this.editorView.scrollDOM.scrollTop,
+				left: this.editorView.scrollDOM.scrollLeft,
+			},
+			hadFocus: this.editorView.hasFocus,
 			...(forceCollapsed !== undefined ? { isCollapsed: forceCollapsed } : {}),
 		});
 	}
 
 	setEditorTheme(newTheme: ManimEditorTheme): void {
-		if (this.editorView) {
-			this.editorView.dispatch({
-				effects: this.themeCompartment.reconfigure(getEditorThemeExtension(newTheme)),
-			});
-		}
+		this.editorView?.dispatch({
+			effects: this.themeCompartment.reconfigure(getEditorThemeExtension(newTheme)),
+		});
 	}
 
 	setVimEnabled(enabled: boolean): void {
-		if (this.editorView) {
-			this.editorView.dispatch({
-				effects: this.vimCompartment.reconfigure(enabled ? vim() : []),
-			});
-		}
+		this.editorView?.dispatch({
+			effects: this.vimCompartment.reconfigure(enabled ? vim() : []),
+		});
 	}
 
 	setEditorFontFamily(fontFamily: ManimEditorFont): void {
-		this.editorHostEl.style.setProperty(
-			'--manim-code-font-family',
-			`'${fontFamily}', var(--font-monospace)`,
-		);
-		if (this.editorView) {
-			this.editorView.dispatch({
-				effects: this.fontCompartment.reconfigure(EditorView.theme({
-					'.cm-content': {
-						fontFamily: `'${fontFamily}', var(--font-monospace)`,
-					},
-				})),
-			});
-		}
+		this.editorHostEl.style.setProperty('--manim-code-font-family', buildFontStack(fontFamily));
+		this.editorView?.requestMeasure();
+	}
+
+	setEditorFontSize(px: number): void {
+		this.editorHostEl.style.setProperty('--manim-code-font-size', `${px}px`);
+		this.editorView?.requestMeasure();
 	}
 
 	getCode(): string {
@@ -201,11 +182,13 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 		this.editorView?.requestMeasure();
 	}
 
+	/** Saves immediately if (and only if) there are edits waiting for the auto-save timer. */
 	async flushPendingSave(): Promise<void> {
-		if (this.saveTimer !== null) {
-			window.clearTimeout(this.saveTimer);
-			this.saveTimer = null;
+		if (this.saveTimer === null) {
+			return;
 		}
+		window.clearTimeout(this.saveTimer);
+		this.saveTimer = null;
 		await this.persistChanges();
 	}
 
@@ -219,23 +202,31 @@ export class ManimCodeEditorChild extends MarkdownRenderChild {
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 		}
-		const delayMs = ((this.plugin as any).settings.autoSaveDelaySeconds ?? 60) * 1000;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
 			void this.persistChanges();
-		}, delayMs);
+		}, this.plugin.settings.autoSaveDelaySeconds * 1000);
 	}
 
 	private async persistChanges(): Promise<void> {
 		this.recordCurrentState();
-		await persistManimCode(this.plugin, this.ctx, this.contextEl, this.getCode());
+		try {
+			await persistManimCode(this.plugin, this.ctx, this.contextEl, this.getCode());
+		} catch (error) {
+			console.error('Failed to save manim code block', error);
+			this.setSaveState('Save failed');
+			return;
+		}
 		this.setSaveState('Saved');
 		if (this.hideSavedTimer !== null) {
 			window.clearTimeout(this.hideSavedTimer);
 		}
 		this.hideSavedTimer = window.setTimeout(() => {
 			this.hideSavedTimer = null;
-			this.setSaveState('');
-		}, 1000);
+			// The status label is shared with run state ("Running...", "Paused"): only clear our own text.
+			if (this.saveStateEl.textContent === 'Saved') {
+				this.setSaveState('');
+			}
+		}, SAVED_INDICATOR_MS);
 	}
 }

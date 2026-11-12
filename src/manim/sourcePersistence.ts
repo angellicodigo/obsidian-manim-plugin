@@ -1,20 +1,16 @@
-import { MarkdownPostProcessorContext, Plugin, TFile } from 'obsidian';
+import { MarkdownPostProcessorContext, TFile } from 'obsidian';
+import type ManimPlugin from '../main';
 
-function buildManimFenceFromSection(sectionText: string, code: string): string {
-	const openingFence = sectionText.match(/^```manim[^\n]*/m)?.[0] ?? '```manim';
-	return `${openingFence}\n${code}\n\`\`\``;
-}
+const OPENING_FENCE = /^\s*(`{3,}|~{3,})\s*manim\b/;
+const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
 
-function replaceSectionByLineRange(fullText: string, lineStart: number, lineEnd: number, replacement: string): string {
-	const lines = fullText.split('\n');
-	const safeStart = Math.max(0, lineStart);
-	const safeEnd = Math.max(safeStart, lineEnd);
-	lines.splice(safeStart, safeEnd - safeStart + 1, ...replacement.split('\n'));
-	return lines.join('\n');
-}
-
+/**
+ * Writes `code` back into the ```manim block that `contextEl` was rendered from.
+ * The block is located by line range and re-validated against the *current* file contents
+ * inside an atomic read-modify-write, so a stale range can never overwrite unrelated lines.
+ */
 export async function persistManimCode(
-	plugin: Plugin,
+	plugin: ManimPlugin,
 	ctx: MarkdownPostProcessorContext,
 	contextEl: HTMLElement,
 	code: string,
@@ -29,11 +25,17 @@ export async function persistManimCode(
 		return;
 	}
 
-	const original = await plugin.app.vault.cachedRead(file);
-	const updatedSection = buildManimFenceFromSection(sectionInfo.text, code);
-	const updatedDoc = replaceSectionByLineRange(original, sectionInfo.lineStart, sectionInfo.lineEnd, updatedSection);
+	const { lineStart, lineEnd } = sectionInfo;
+	await plugin.app.vault.process(file, (data) => {
+		const eol = data.includes('\r\n') ? '\r\n' : '\n';
+		const lines = data.split(eol);
+		const opening = lines[lineStart];
+		const closing = lines[lineEnd];
+		if (opening === undefined || closing === undefined || !OPENING_FENCE.test(opening) || !CLOSING_FENCE.test(closing)) {
+			return data;
+		}
 
-	if (updatedDoc !== original) {
-		await plugin.app.vault.modify(file, updatedDoc);
-	}
+		lines.splice(lineStart, lineEnd - lineStart + 1, opening, ...code.split('\n'), closing);
+		return lines.join(eol);
+	});
 }

@@ -4,6 +4,15 @@ import { transform } from 'sucrase';
 const manimNamedImportPattern = /import\s*\{([\s\S]*?)\}\s*from\s*['\"](?:manim-web|\.\.\/src\/index(?:\.ts)?)['\"]\s*;?/g;
 const manimStarImportPattern = /import\s*\*\s*as\s+(\w+)\s*from\s*['\"](?:manim-web|\.\.\/src\/index(?:\.ts)?)['\"]\s*;?/g;
 
+/** Runs `action`, swallowing any error (used for best-effort cleanup and optional scene hooks). */
+function safely(action: () => unknown): void {
+	try {
+		action();
+	} catch {
+		// ignore
+	}
+}
+
 function toDestructureField(specifier: string): string {
 	const clean = specifier.trim().replace(/\s+/g, ' ');
 	if (!clean) {
@@ -96,29 +105,31 @@ function transpileToJavaScript(source: string): string {
 }
 
 function createDocumentProxy(container: HTMLElement): Document {
-	const getElementById = (id: string) => {
-		if (id === 'container' || id === 'presentation-container' || !document.getElementById(id)) {
-			return container;
-		}
-		return document.getElementById(id);
-	};
+	// Scene code looks up its mount point by id/selector; anything that can't be found maps to our container.
+	const getElementById = (id: string) =>
+		id === 'container' || id === 'presentation-container'
+			? container
+			: (document.getElementById(id) ?? container);
 
-	const querySelector = (selector: string) => {
-		if (selector === '#container' || selector === '#presentation-container' || !document.querySelector(selector)) {
-			return container;
-		}
-		return document.querySelector(selector);
-	};
+	const querySelector = (selector: string) =>
+		selector === '#container' || selector === '#presentation-container'
+			? container
+			: (document.querySelector(selector) ?? container);
 
 	return new Proxy(document, {
-		get(target, prop, receiver) {
+		get(target, prop) {
 			if (prop === 'getElementById') {
 				return getElementById;
 			}
 			if (prop === 'querySelector') {
 				return querySelector;
 			}
-			return Reflect.get(target, prop, receiver);
+			// Native DOM methods/getters throw "Illegal invocation" when `this` is the proxy, so bind to the real document.
+			const value = Reflect.get(target, prop, target);
+			return typeof value === 'function' ? value.bind(target) : value;
+		},
+		set(target, prop, value) {
+			return Reflect.set(target, prop, value, target);
 		},
 	}) as Document;
 }
@@ -170,11 +181,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		const waiters = [...resumeWaiters];
 		resumeWaiters.length = 0;
 		for (const waiter of waiters) {
-			try {
-				waiter();
-			} catch {
-				// ignore
-			}
+			safely(() => waiter());
 		}
 	};
 
@@ -270,20 +277,12 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 
 		// 2. Pause timeline and audio
 		if (originalPause) {
-			try {
-				originalPause();
-			} catch {
-				// ignore
-			}
+			safely(() => originalPause());
 		}
 
 		// 3. Stop render loops immediately to freeze canvas frame
 		if (typeof rawScene._stopRenderLoop === 'function') {
-			try {
-				rawScene._stopRenderLoop();
-			} catch {
-				// ignore
-			}
+			safely(() => rawScene._stopRenderLoop());
 		}
 	};
 
@@ -297,24 +296,12 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		const timeline = rawScene._timeline;
 		if (timeline && typeof timeline.isFinished === 'function' && !timeline.isFinished()) {
 			rawScene._isPlaying = true;
-			try {
-				timeline.play?.();
-			} catch {
-				// ignore
-			}
+			safely(() => timeline.play?.());
 			if (typeof rawScene._startRenderLoop === 'function') {
-				try {
-					rawScene._startRenderLoop();
-				} catch {
-					// ignore
-				}
+				safely(() => rawScene._startRenderLoop());
 			}
 			if (rawScene._audioManager) {
-				try {
-					rawScene._audioManager.play?.();
-				} catch {
-					// ignore
-				}
+				safely(() => rawScene._audioManager.play?.());
 			}
 		}
 
@@ -330,11 +317,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		}
 		triggerResume();
 		if (originalStop) {
-			try {
-				originalStop();
-			} catch {
-				// ignore
-			}
+			safely(() => originalStop());
 		}
 	};
 
@@ -352,11 +335,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		triggerResume();
 
 		if (originalDispose) {
-			try {
-				originalDispose();
-			} catch {
-				// ignore
-			}
+			safely(() => originalDispose());
 		}
 	};
 
@@ -430,11 +409,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 
 			if (!needsPerFrame) {
 				if (typeof rawScene._render === 'function') {
-					try {
-						rawScene._render();
-					} catch {
-						// ignore
-					}
+					safely(() => rawScene._render());
 				}
 				remainingMs = await sleepWithInterrupt(remainingMs);
 			} else {
@@ -590,10 +565,6 @@ function extractPlayerOptions(config: unknown): Record<string, any> {
 	return {};
 }
 
-function normalizePlayerOptions(options: unknown): Record<string, any> {
-	return extractPlayerOptions(options);
-}
-
 interface ExtractedPlayerArgs {
 	container: HTMLElement;
 	options: unknown;
@@ -634,7 +605,7 @@ function createPlayerProxy(
 			if (container.setAttribute && !container.hasAttribute('tabindex')) {
 				container.setAttribute('tabindex', '0');
 			}
-			const normalizedOptions = normalizePlayerOptions(options);
+			const normalizedOptions = extractPlayerOptions(options);
 			const effectiveArgs = [container, normalizedOptions, ...extraArgs];
 			const instance = Reflect.construct(target, effectiveArgs, newTarget);
 			patchPlayerSlidesNavigation(instance);
@@ -723,11 +694,7 @@ function createPlayerSceneAdapter(
 			isFinished,
 		};
 		for (const listener of stateListeners) {
-			try {
-				listener(payload);
-			} catch {
-				// ignore listener errors
-			}
+			safely(() => listener(payload));
 		}
 	};
 
@@ -784,11 +751,7 @@ function createPlayerSceneAdapter(
 		dispose: () => {
 			cleanupListeners();
 			stateListeners.clear();
-			try {
-				player.dispose?.();
-			} catch {
-				// ignore disposal errors
-			}
+			safely(() => player.dispose?.());
 		},
 		onStateChange: (listener: (state: SceneStateChange) => void) => {
 			stateListeners.add(listener);
@@ -849,7 +812,14 @@ export async function runManimSource(
 		`return (async () => {\n${code}\n})();`,
 	);
 
-	await executor(mount, mount, manimWebProxy, documentProxy, window, window, exports);
+	try {
+		await executor(mount, mount, manimWebProxy, documentProxy, window, window, exports);
+	} catch (error) {
+		// A player created before the script threw is never handed to the caller; dispose it so its
+		// listeners and render loop don't leak.
+		safely(() => capturedPlayer?.dispose?.());
+		throw error;
+	}
 
 	const activePlayer = resolveActivePlayer(capturedPlayer, exports);
 	if (activePlayer) {

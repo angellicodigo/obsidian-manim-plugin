@@ -1,51 +1,34 @@
 import { Plugin } from 'obsidian';
 import { registerManimCodeBlockProcessor } from './manim/codeBlockProcessor';
-import { DEFAULT_SETTINGS, ManimEditorTheme, ManimEditorFont, MyPluginSettings, SampleSettingTab } from './settings';
+import { DEFAULT_SETTINGS, ManimEditorFont, ManimEditorTheme, ManimPluginSettings, ManimSettingTab } from './settings';
 
-export interface ThemeableEditor {
-	setEditorTheme(newTheme: ManimEditorTheme): void;
-	setVimEnabled?(enabled: boolean): void;
-	setEditorFontFamily?(fontFamily: ManimEditorFont): void;
+/** What the plugin needs from an open embedded editor so setting changes apply live. */
+export interface ManimEditor {
+	setEditorTheme(theme: ManimEditorTheme): void;
+	setVimEnabled(enabled: boolean): void;
+	setEditorFontFamily(font: ManimEditorFont): void;
+	setEditorFontSize(px: number): void;
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-	private activeEditors = new Set<ThemeableEditor>();
+export default class ManimPlugin extends Plugin {
+	settings: ManimPluginSettings = { ...DEFAULT_SETTINGS };
+	private readonly activeEditors = new Set<ManimEditor>();
 
-	registerActiveEditor(editor: ThemeableEditor) {
+	registerActiveEditor(editor: ManimEditor): void {
 		this.activeEditors.add(editor);
 	}
 
-	unregisterActiveEditor(editor: ThemeableEditor) {
+	unregisterActiveEditor(editor: ManimEditor): void {
 		this.activeEditors.delete(editor);
 	}
 
-	updateAllEditorThemes(newTheme: ManimEditorTheme) {
+	/** Runs `action` on every open editor, isolating failures so one bad editor can't block the rest. */
+	applyToEditors(action: (editor: ManimEditor) => void): void {
 		for (const editor of this.activeEditors) {
 			try {
-				editor.setEditorTheme(newTheme);
+				action(editor);
 			} catch (err) {
-				console.error('Failed to update editor theme', err);
-			}
-		}
-	}
-
-	updateAllEditorVim(enabled: boolean) {
-		for (const editor of this.activeEditors) {
-			try {
-				editor.setVimEnabled?.(enabled);
-			} catch (err) {
-				console.error('Failed to update editor vim mode', err);
-			}
-		}
-	}
-
-	updateAllEditorFontFamilies(fontFamily: ManimEditorFont) {
-		for (const editor of this.activeEditors) {
-			try {
-				editor.setEditorFontFamily?.(fontFamily);
-			} catch (err) {
-				console.error('Failed to update editor font family', err);
+				console.error('Failed to update manim editor', err);
 			}
 		}
 	}
@@ -53,13 +36,12 @@ export default class MyPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new ManimSettingTab(this.app, this));
 
 		this.registerEvent(
 			(this.app.vault as any).on('config-changed', () => {
 				const isVim = Boolean((this.app.vault as any).getConfig('vimMode'));
-				this.updateAllEditorVim(isVim);
+				this.applyToEditors((editor) => editor.setVimEnabled(isVim));
 			})
 		);
 
@@ -71,7 +53,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<ManimPluginSettings>);
 	}
 
 	async saveSettings() {

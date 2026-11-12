@@ -127,6 +127,7 @@
 	border-radius: var(--code-radius, 6px);
 	border: 1px solid var(--background-modifier-border-hover, var(--background-modifier-border));
 	overflow: hidden;
+	--manim-vim-cursor-color: #f10707;
 }
 
 .manim-code-editor .cm-editor {
@@ -167,10 +168,6 @@
 
 .manim-code-editor .cm-focused {
 	outline: none;
-}
-
-.manim-code-editor {
-	--manim-vim-cursor-color: #f10707;
 }
 
 .manim-code-editor .cm-fat-cursor,

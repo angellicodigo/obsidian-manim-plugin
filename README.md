@@ -88,13 +88,13 @@ The output can be directly pasted into an Obsidian ` ```manim ` code block.
 
 ## Settings
 
-**Editor Theme**
-- Obsidian (default, synced with your vault's theme)
-- GitHub Light / Dark
-- Monokai  
-- One Dark
-
 Access via **Settings → Community Plugins → Manim Plugin**.
+
+- **Editor theme**: Obsidian (default, synced with your vault's theme), GitHub Light / Dark, Monokai or One Dark.
+- **Editor font**: JetBrains Mono, Monospace, Fira Code, Lucida Console or Consolas. The font must be installed on your system; otherwise Obsidian's monospace font is used.
+- **Font size**: font size of the code editor in pixels (8-40, default 14).
+- **Auto-save delay**: seconds to wait after you stop typing before the code is written back to the note (1-300, default 60).
+- **Collapse code by default**: open blocks with the code editor collapsed.
 
 ## TypeScript Support
 
@@ -139,5 +139,3 @@ Built with:
 - [ ] **Demo screenshots & GIFs** showcasing editor, rendering, and themes
 - [ ] Improved cursor handling in code editor
 - [ ] Export animations to HTML/MP4
-
-quick test 3

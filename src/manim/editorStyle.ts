@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import type { ManimEditorFont } from '../settings';
 
 export const manimEditorTheme = EditorView.theme({
 	'&': {
@@ -41,20 +42,27 @@ function setVarFromComputed(host: HTMLElement, name: string, element: Element | 
 	}
 }
 
+/**
+ * Builds the CSS `font-family` value for the editor. The generic `monospace` keyword must not be
+ * quoted (a quoted 'Monospace' is looked up as a font *name*), and Obsidian's own monospace font is
+ * always the fallback for fonts that aren't installed.
+ */
+export function buildFontStack(font: ManimEditorFont): string {
+	const family = font === 'Monospace' ? 'monospace' : `'${font}'`;
+	return `${family}, var(--font-monospace)`;
+}
+
 export function syncStylesFromNativeCodeMirror(hostEl: HTMLElement): void {
-	// Mirror typography/colors from the currently visible native CM6 editor.
+	// Mirror colors/spacing from the currently visible native CM6 editor.
+	// Font family and size are NOT mirrored: they come from the plugin settings (see ManimCodeEditorChild).
 	const nativeContent = document.querySelector('.markdown-source-view.mod-cm6 .cm-editor .cm-content');
 	const nativeSelection = document.querySelector('.markdown-source-view.mod-cm6 .cm-editor .cm-selectionBackground');
-	const nativeCursor = document.querySelector('.markdown-source-view.mod-cm6 .cm-editor .cm-cursor');
 
 	// Note: We use var(--code-background) directly to match Python and native code blocks,
 	// rather than reading nativeEditor (which is transparent in grid/canvas themes).
 	setVarFromComputed(hostEl, '--manim-code-color', nativeContent, 'color');
-	setVarFromComputed(hostEl, '--manim-code-font-family', nativeContent, 'font-family');
-	setVarFromComputed(hostEl, '--manim-code-font-size', nativeContent, 'font-size');
 	setVarFromComputed(hostEl, '--manim-code-line-height', nativeContent, 'line-height');
 	setVarFromComputed(hostEl, '--manim-code-letter-spacing', nativeContent, 'letter-spacing');
 	setVarFromComputed(hostEl, '--manim-code-font-weight', nativeContent, 'font-weight');
 	setVarFromComputed(hostEl, '--manim-selection-color', nativeSelection, 'background-color');
-	setVarFromComputed(hostEl, '--manim-caret-color', nativeCursor, 'border-left-color');
 }
