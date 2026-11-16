@@ -1,4 +1,4 @@
-import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
 import { defaultHighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
@@ -6,6 +6,7 @@ import { Compartment, EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap } from '@codemirror/view';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import { vim } from '@replit/codemirror-vim';
+import { manimWebCompletionSource } from './completion';
 import { MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian';
 import type ManimPlugin from '../main';
 import type { ManimEditor } from '../main';
@@ -65,6 +66,13 @@ export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEd
 			closeBrackets(),
 			manimEditorTheme,
 			this.themeCompartment.of(getEditorThemeExtension(this.theme)),
+			autocompletion({
+				override: [manimWebCompletionSource],
+				activateOnTyping: true,
+				activateOnTypingDelay: 50,
+				selectOnOpen: false,
+				icons: true,
+			}),
 			this.lintCompartment.of(linter((view) => {
 				// Map stored diagnostics (by line) to current document character offsets.
 				const result: Diagnostic[] = [];
@@ -81,7 +89,7 @@ export class ManimCodeEditorChild extends MarkdownRenderChild implements ManimEd
 			EditorView.lineWrapping,
 			EditorState.tabSize.of(4),
 			indentUnit.of('    '),
-			keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
+			keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...completionKeymap]),
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged) {
 					this.scheduleSave();
