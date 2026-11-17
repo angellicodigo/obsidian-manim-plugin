@@ -189,6 +189,9 @@ function createPlayerSceneAdapter(
 		play: async () => { player.play?.(); notifyState(); },
 		pause: () => { player.pause?.(); notifyState(); },
 		resume: () => { player.play?.(); notifyState(); },
+		seek: (time: number) => { player.seek?.(time); notifyState(); },
+		getCurrentTime: () => player._masterTimeline?.getCurrentTime?.() ?? 0,
+		getDuration: () => player._masterTimeline?.getDuration?.() ?? 0,
 		stop: () => { player.pause?.(); player.seek?.(0); notifyState(); },
 		dispose: () => { cleanupListeners(); stateListeners.clear(); safely(() => player.dispose?.()); },
 		onStateChange: (listener: (state: SceneStateChange) => void) => {

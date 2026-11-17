@@ -19,6 +19,7 @@ export interface ManimPluginSettings {
 	autoSaveDelaySeconds: number;
 	defaultCollapsed: boolean;
 	autoRun: AutoRunMode;
+	playbackLeadInSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: ManimPluginSettings = {
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: ManimPluginSettings = {
 	autoSaveDelaySeconds: 5,
 	defaultCollapsed: false,
 	autoRun: 'never',
+	playbackLeadInSeconds: 1,
 };
 
 const THEME_OPTIONS: Record<ManimEditorTheme, string> = {
@@ -131,6 +133,19 @@ export class ManimSettingTab extends PluginSettingTab {
 				.setValue(settings.defaultCollapsed)
 				.onChange(async (value) => {
 					settings.defaultCollapsed = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Playback rewind')
+			.setDesc('Seconds to rewind before resuming a re-run animation.')
+			.addText((text) => text
+				.setPlaceholder(String(DEFAULT_SETTINGS.playbackLeadInSeconds))
+				.setValue(String(settings.playbackLeadInSeconds))
+				.onChange(async (value) => {
+					const seconds = Number(value);
+					if (!Number.isFinite(seconds) || seconds < 0 || seconds > 30) return;
+					settings.playbackLeadInSeconds = seconds;
 					await this.plugin.saveSettings();
 				}));
 

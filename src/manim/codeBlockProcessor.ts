@@ -1,12 +1,37 @@
-import { Notice, setIcon } from 'obsidian';
+import { MarkdownView, Notice, setIcon } from 'obsidian';
 import type ManimPlugin from '../main';
-import { ManimCodeEditorChild } from './editorChild';
-import { syncStylesFromNativeCodeMirror } from './editorStyle';
 import { runManimSource, type ConstructableScene, type SceneStateChange } from './runtime';
-import { getPersistedBlockState, saveBlockState } from './stateStore';
-import type { Diagnostic } from '@codemirror/lint';
 
 type RunState = 'idle' | 'running' | 'paused';
+
+const pendingPlaybackTimeByBlock = new Map<string, number>();
+
+interface EditableBlock {
+	plugin: ManimPlugin;
+	ctx: { sourcePath: string; getSectionInfo: (el: HTMLElement) => { lineStart: number } | null };
+	el: HTMLElement;
+}
+
+const editableBlockByContainer = new WeakMap<HTMLElement, EditableBlock>();
+
+async function openBlockInSourceMode(target: EditableBlock): Promise<void> {
+	const section = target.ctx.getSectionInfo(target.el);
+	const view = target.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+	if (!section || !view || view.file?.path !== target.ctx.sourcePath) return;
+
+	if (view.getMode() !== 'source') {
+		await (view as any).setState({ mode: 'source' }, { history: false });
+	}
+
+	const position = { line: section.lineStart + 1, ch: 0 };
+	view.editor.setCursor(position);
+	view.editor.scrollIntoView({ from: position, to: position }, true);
+	view.editor.focus();
+}
+
+function getBlockKey(ctx: { sourcePath: string; getSectionInfo: (el: HTMLElement) => { lineStart: number } | null }, el: HTMLElement): string {
+	return `${ctx.sourcePath}:${ctx.getSectionInfo(el)?.lineStart ?? el.id}`;
+}
 
 function formatRuntimeError(error: unknown): string {
 	if (error instanceof Error) {
@@ -16,46 +41,42 @@ function formatRuntimeError(error: unknown): string {
 	return String(error);
 }
 
-/** Build a CodeMirror diagnostic from a runtime error. Uses character offset 0 on line 0;
- * the line number (if extracted) is included in the message. */
-function errorToDiagnostic(error: unknown): Diagnostic | null {
-	const message = error instanceof Error ? error.message : String(error);
-	return {
-		from: 0,
-		to: Math.max(1, message.length),
-		message,
-		severity: 'error',
-	};
-}
-
 function toRunState(state: SceneStateChange): RunState {
-	if (state.isRunning) {
-		return 'running';
-	}
+	if (state.isRunning) return 'running';
 	return state.isPaused ? 'paused' : 'idle';
 }
 
-function setCollapsedState(codeEditorEl: HTMLElement, collapseCaretEl: HTMLElement, collapsed: boolean): void {
-	codeEditorEl.style.display = collapsed ? 'none' : 'block';
-	collapseCaretEl.textContent = collapsed ? '▸' : '▾';
-	collapseCaretEl.setAttribute('aria-label', collapsed ? 'Expand code' : 'Collapse code');
-}
-
 export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
+	plugin.registerDomEvent(document, 'click', (event: MouseEvent) => {
+		const clicked = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+			'.edit-block-button, button[aria-label*="Edit this block"], button[title*="Edit this block"]',
+		);
+		if (!clicked) return;
+
+		let container: HTMLElement | null = clicked;
+		let target: EditableBlock | undefined;
+		while (container && !target) {
+			target = editableBlockByContainer.get(container);
+			container = container.parentElement;
+		}
+		if (!target) return;
+
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		void openBlockInSourceMode(target);
+	}, true);
+
 	plugin.registerMarkdownCodeBlockProcessor('manim', (source, el, ctx) => {
-		const savedState = getPersistedBlockState(ctx, el);
-
+		const editableBlock: EditableBlock = { plugin, ctx, el };
 		const wrapper = el.createDiv({ cls: 'manim-block' });
-		syncStylesFromNativeCodeMirror(wrapper);
-
-		let isCollapsed = savedState?.isCollapsed ?? plugin.settings.defaultCollapsed;
-
-		// --- Header: collapse caret + status label + run/restart buttons ---
+		editableBlockByContainer.set(wrapper, editableBlock);
+		let editableContainer: HTMLElement | null = wrapper.parentElement;
+		for (let depth = 0; editableContainer && depth < 6; depth++) {
+			editableBlockByContainer.set(editableContainer, editableBlock);
+			editableContainer = editableContainer.parentElement;
+		}
+		const blockKey = getBlockKey(ctx, el);
 		const header = wrapper.createDiv({ cls: 'manim-block-header' });
-		const collapseCaret = header.createSpan({ cls: 'manim-collapse-caret' });
-		collapseCaret.setAttribute('role', 'button');
-		collapseCaret.setAttribute('tabindex', '0');
-
 		const controls = header.createDiv({ cls: 'manim-block-controls' });
 		const statusEl = controls.createSpan({ cls: 'manim-save-state' });
 		statusEl.style.display = 'none';
@@ -64,223 +85,112 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 		runButton.type = 'button';
 		const runIcon = runButton.createSpan({ cls: 'manim-button-icon' });
 		const runLabel = runButton.createSpan({ cls: 'manim-run-label' });
-
 		const restartButton = controls.createEl('button', { cls: 'manim-control-button manim-restart-button' });
 		restartButton.type = 'button';
 		setIcon(restartButton, 'rotate-ccw');
 		restartButton.setAttribute('aria-label', 'Restart animation');
 
-		// --- Body: code editor, canvas, error panel ---
-		// Reuse Obsidian's CM6 container classes so native editor styles apply.
-		const codeEditor = wrapper.createDiv({ cls: 'manim-code-editor markdown-source-view mod-cm6' });
-		const editorChild = new ManimCodeEditorChild(
-			plugin,
-			ctx,
-			el,
-			codeEditor,
-			source,
-			statusEl,
-			plugin.settings.editorTheme,
-			savedState,
-		);
-		ctx.addChild(editorChild);
-
 		const canvas = wrapper.createDiv({ cls: 'manim-canvas' });
 		const errorPanel = wrapper.createEl('pre', { cls: 'manim-error-panel' });
 		errorPanel.style.display = 'none';
 
+		let runState: RunState = 'idle';
+		const setStatus = (text: string) => {
+			statusEl.textContent = text;
+			statusEl.style.display = text ? 'inline-block' : 'none';
+		};
+		const setRunState = (state: RunState) => {
+			runState = state;
+			const running = state === 'running';
+			setIcon(runIcon, running ? 'pause' : 'play');
+			runLabel.textContent = running ? 'Pause' : 'Run';
+			runButton.setAttribute('aria-label', running ? 'Pause animation' : 'Run animation');
+			setStatus(running ? 'Running...' : state === 'paused' ? 'Paused' : '');
+		};
+		setRunState('idle');
+
+		let executionCounter = 0;
+		let currentScene: ConstructableScene | null = null;
+		let unsubscribeSceneState: (() => void) | null = null;
+		let unloaded = false;
+
+		const teardownScene = () => {
+			unsubscribeSceneState?.();
+			unsubscribeSceneState = null;
+			try { currentScene?.dispose?.(); } catch { /* cleanup is best effort */ }
+			currentScene = null;
+		};
 		const showError = (message: string | null) => {
 			errorPanel.textContent = message ?? '';
 			errorPanel.style.display = message ? 'block' : 'none';
 		};
 
-		const setStatus = (text: string) => {
-			statusEl.textContent = text;
-			statusEl.style.display = text ? 'inline-block' : 'none';
-		};
-
-		// --- Run state (button + status label always change together) ---
-		let runState: RunState = 'idle';
-		const setRunState = (state: RunState) => {
-			runState = state;
-			const isRunning = state === 'running';
-			setIcon(runIcon, isRunning ? 'pause' : 'play');
-			runLabel.textContent = isRunning ? 'Pause' : 'Run';
-			runButton.setAttribute('aria-label', isRunning ? 'Pause animation' : 'Run animation');
-			setStatus(isRunning ? 'Running...' : state === 'paused' ? 'Paused' : '');
-		};
-		setRunState('idle');
-
-		// --- Collapse ---
-		setCollapsedState(codeEditor, collapseCaret, isCollapsed);
-		if (!isCollapsed) {
-			editorChild.requestMeasure();
-		}
-
-		const toggleCollapse = () => {
-			isCollapsed = !isCollapsed;
-			setCollapsedState(codeEditor, collapseCaret, isCollapsed);
-			saveBlockState(ctx, el, { isCollapsed });
-			if (!isCollapsed) {
-				editorChild.requestMeasure();
-			}
-		};
-
-		// Clicking anywhere in the header (including the caret) toggles, except on the buttons.
-		editorChild.registerDomEvent(header, 'click', (evt: MouseEvent) => {
-			if ((evt.target as HTMLElement).closest('.manim-control-button')) {
-				return;
-			}
-			toggleCollapse();
-		});
-
-		editorChild.registerDomEvent(collapseCaret, 'keydown', (evt: KeyboardEvent) => {
-			if (evt.key !== 'Enter' && evt.key !== ' ') {
-				return;
-			}
-			evt.preventDefault();
-			toggleCollapse();
-		});
-
-		// --- Scene lifecycle ---
-		let executionCounter = 0;
-		let currentScene: ConstructableScene | null = null;
-		let unsubscribeSceneState: (() => void) | null = null;
-		let lastRanCode = '';
-		let isBlockUnloaded = false;
-
-		const unsubscribeScene = () => {
-			unsubscribeSceneState?.();
-			unsubscribeSceneState = null;
-		};
-
-		const teardownScene = () => {
-			unsubscribeScene();
-			try {
-				currentScene?.dispose?.();
-			} catch {
-				// ignore cleanup errors
-			}
-			currentScene = null;
-		};
-
-		editorChild.register(() => {
-			isBlockUnloaded = true;
-			teardownScene();
-		});
-
-		const execute = async () => {
+		const execute = async (resumeTime: number | null) => {
+			pendingPlaybackTimeByBlock.delete(blockKey);
 			const executionId = ++executionCounter;
-			const isStale = () => executionId !== executionCounter || isBlockUnloaded;
-
+			const isStale = () => unloaded || executionId !== executionCounter;
 			teardownScene();
-			setRunState('running');
 			showError(null);
-
-			const codeToRun = editorChild.getCode();
-			lastRanCode = codeToRun;
-
-			// Record cursor/scroll/focus without forcing collapsed state (that
-			// only changes when the user toggles the caret).
-			editorChild.recordCurrentState();
-
+			setRunState('running');
 			try {
-				await editorChild.flushPendingSave();
-				if (isStale()) {
-					return;
-				}
-
-				const mountedScene = await runManimSource(codeToRun, canvas, (scene) => {
-					if (isStale()) {
-						scene.dispose?.();
-						return;
-					}
+				const mountedScene = await runManimSource(source, canvas, (scene) => {
+					if (isStale()) { scene.dispose?.(); return; }
 					currentScene = scene;
 					unsubscribeSceneState = scene.onStateChange?.((state) => {
-						if (!isStale()) {
-							setRunState(toRunState(state));
-						}
+						if (!isStale()) setRunState(toRunState(state));
 					}) ?? null;
 				});
-
-				if (isStale()) {
-					return;
+				if (isStale()) return;
+				if (mountedScene) currentScene = mountedScene;
+				if (resumeTime !== null && currentScene?.seek && currentScene.play) {
+					currentScene.seek(Math.max(0, resumeTime - plugin.settings.playbackLeadInSeconds));
+					await currentScene.play();
 				}
-				if (mountedScene) {
-					currentScene = mountedScene;
-				}
-
-				// Player scenes report their own state changes; class/function scenes are done once they resolve.
-				if (typeof currentScene?.onStateChange !== 'function') {
-					setRunState('idle');
-				}
-				editorChild.setLintErrors([]);
+				if (typeof currentScene?.onStateChange !== 'function') setRunState('idle');
 			} catch (error) {
-				if (isStale()) {
-					return;
-				}
-				unsubscribeScene();
+				if (isStale()) return;
 				showError(formatRuntimeError(error));
-				const diagnostic = errorToDiagnostic(error);
-				if (diagnostic) editorChild.setLintErrors([diagnostic]);
 				new Notice(`Manim render failed: ${error instanceof Error ? error.message : String(error)}`);
 				setRunState('idle');
 			}
 		};
 
-		const handleRunPauseClick = () => {
+		const runOrPause = () => {
 			if (runState === 'running') {
-				try {
-					currentScene?.pause?.();
-				} catch {
-					// ignore
-				}
+				currentScene?.pause?.();
 				setRunState('paused');
 				return;
 			}
-
-			if (runState === 'paused' && currentScene && editorChild.getCode() === lastRanCode) {
-				try {
-					currentScene.resume?.();
-					setRunState('running');
-					return;
-				} catch {
-					// fall back to re-running if resume fails
-				}
+			if (runState === 'paused') {
+				currentScene?.resume?.();
+				setRunState('running');
+				return;
 			}
-
-			// Finished, never ran, edited while paused, or resume failed: restart from scratch.
-			void execute();
+			void execute(pendingPlaybackTimeByBlock.get(blockKey) ?? currentScene?.getCurrentTime?.() ?? null);
 		};
+		runButton.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); runOrPause(); });
+		restartButton.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void execute(null); });
 
-		editorChild.registerDomEvent(runButton, 'click', (evt: MouseEvent) => {
-			evt.preventDefault();
-			evt.stopPropagation();
-			handleRunPauseClick();
-		});
+		ctx.addChild({
+			load: () => undefined,
+			onunload: () => {
+				const time = currentScene?.getCurrentTime?.();
+				if (time !== undefined && time > 0) pendingPlaybackTimeByBlock.set(blockKey, time);
+				unloaded = true;
+				executionCounter++;
+				teardownScene();
+			},
+		} as any);
 
-		editorChild.registerDomEvent(restartButton, 'click', (evt: MouseEvent) => {
-			evt.preventDefault();
-			evt.stopPropagation();
-			void execute();
-		});
-
-		// Auto-run on open, honoring the user's auto-run setting.
-		if (plugin.settings.autoRun === 'always') {
-			void execute();
-		} else if (plugin.settings.autoRun === 'visible') {
-			// Only run when the block scrolled into view; stop observing after first run.
+		if (plugin.settings.autoRun === 'always') void execute(null);
+		else if (plugin.settings.autoRun === 'visible') {
 			const observer = new IntersectionObserver((entries) => {
-				for (const entry of entries) {
-					if (entry.isIntersecting) {
-						observer.disconnect();
-						void execute();
-						return;
-					}
+				if (entries.some((entry) => entry.isIntersecting)) {
+					observer.disconnect();
+					void execute(null);
 				}
-			}, { root: null, rootMargin: '0px', threshold: 0 });
+			});
 			observer.observe(wrapper);
 		}
-		// 'never': do nothing; user clicks Run explicitly.
 	});
 }

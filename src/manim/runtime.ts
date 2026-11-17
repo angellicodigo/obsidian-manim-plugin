@@ -18,6 +18,9 @@ export interface ConstructableScene {
 	pause?: () => void;
 	resume?: () => void;
 	stop?: () => void;
+	seek?: (time: number) => void;
+	getCurrentTime?: () => number;
+	getDuration?: () => number;
 	dispose?: () => void;
 	isPlaying?: boolean;
 	isPaused?: boolean;
