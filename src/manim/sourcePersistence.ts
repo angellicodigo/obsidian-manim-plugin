@@ -1,8 +1,7 @@
 import { MarkdownPostProcessorContext, TFile } from 'obsidian';
 import type ManimPlugin from '../main';
 
-const OPENING_FENCE = /^\s*(`{3,}|~{3,})\s*manim\b/;
-const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
+import { CLOSING_FENCE, OPENING_FENCE } from './fences';
 
 /**
  * Writes `code` back into the ```manim block that `contextEl` was rendered from.

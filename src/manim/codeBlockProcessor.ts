@@ -1,35 +1,25 @@
-import { MarkdownView, Notice, setIcon } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
+import { MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownView, Notice, setIcon } from 'obsidian';
 import type ManimPlugin from '../main';
+import { OPENING_FENCE } from './fences';
 import { runManimSource, type ConstructableScene, type SceneStateChange } from './runtime';
 
 type RunState = 'idle' | 'running' | 'paused';
 
+const EDIT_BUTTON_SELECTOR = '.edit-block-button, button[aria-label*="Edit this block"], button[title*="Edit this block"]';
+
+/** Playback time of a block that was unloaded (e.g. while its source was being edited), so Run can resume there. */
 const pendingPlaybackTimeByBlock = new Map<string, number>();
 
 interface EditableBlock {
-	plugin: ManimPlugin;
-	ctx: { sourcePath: string; getSectionInfo: (el: HTMLElement) => { lineStart: number } | null };
+	ctx: MarkdownPostProcessorContext;
 	el: HTMLElement;
 }
 
-const editableBlockByContainer = new WeakMap<HTMLElement, EditableBlock>();
+/** Keyed by the rendered `.manim-block` element, so an "Edit this block" click maps to exactly one block. */
+const editableBlockByWrapper = new WeakMap<HTMLElement, EditableBlock>();
 
-async function openBlockInSourceMode(target: EditableBlock): Promise<void> {
-	const section = target.ctx.getSectionInfo(target.el);
-	const view = target.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-	if (!section || !view || view.file?.path !== target.ctx.sourcePath) return;
-
-	if (view.getMode() !== 'source') {
-		await (view as any).setState({ mode: 'source' }, { history: false });
-	}
-
-	const position = { line: section.lineStart + 1, ch: 0 };
-	view.editor.setCursor(position);
-	view.editor.scrollIntoView({ from: position, to: position }, true);
-	view.editor.focus();
-}
-
-function getBlockKey(ctx: { sourcePath: string; getSectionInfo: (el: HTMLElement) => { lineStart: number } | null }, el: HTMLElement): string {
+function getBlockKey(ctx: MarkdownPostProcessorContext, el: HTMLElement): string {
 	return `${ctx.sourcePath}:${ctx.getSectionInfo(el)?.lineStart ?? el.id}`;
 }
 
@@ -46,36 +36,75 @@ function toRunState(state: SceneStateChange): RunState {
 	return state.isPaused ? 'paused' : 'idle';
 }
 
-export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
-	plugin.registerDomEvent(document, 'click', (event: MouseEvent) => {
-		const clicked = (event.target as HTMLElement | null)?.closest<HTMLElement>(
-			'.edit-block-button, button[aria-label*="Edit this block"], button[title*="Edit this block"]',
-		);
-		if (!clicked) return;
+/**
+ * Finds the 0-based line of the block's opening fence in the *current* document.
+ * The editor position of the rendered widget is preferred (it always reflects the live document);
+ * the processor's section info is the fallback. Either candidate must really be a manim fence.
+ */
+function findOpeningFenceLine(view: MarkdownView, target: EditableBlock, embedEl: HTMLElement | null): number | null {
+	const editor = view.editor;
+	const candidates: Array<() => number | null> = [
+		() => {
+			const cm = (editor as unknown as { cm?: EditorView }).cm;
+			if (!cm || !embedEl) return null;
+			return cm.state.doc.lineAt(cm.posAtDOM(embedEl)).number - 1;
+		},
+		() => target.ctx.getSectionInfo(target.el)?.lineStart ?? null,
+	];
 
-		let container: HTMLElement | null = clicked;
-		let target: EditableBlock | undefined;
-		while (container && !target) {
-			target = editableBlockByContainer.get(container);
-			container = container.parentElement;
+	for (const candidate of candidates) {
+		try {
+			const line = candidate();
+			if (line !== null && line >= 0 && line < editor.lineCount() && OPENING_FENCE.test(editor.getLine(line))) {
+				return line;
+			}
+		} catch {
+			// try the next candidate
 		}
+	}
+	return null;
+}
+
+/** Puts the cursor inside the block's fence so Live Preview swaps the widget for the raw source. */
+function revealBlockSource(plugin: ManimPlugin, target: EditableBlock, embedEl: HTMLElement | null): boolean {
+	const view = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+	if (!view || view.file?.path !== target.ctx.sourcePath) return false;
+
+	const fenceLine = findOpeningFenceLine(view, target, embedEl);
+	if (fenceLine === null) return false;
+
+	const editor = view.editor;
+	const position = { line: Math.min(fenceLine + 1, editor.lineCount() - 1), ch: 0 };
+	editor.setCursor(position);
+	editor.scrollIntoView({ from: position, to: position }, true);
+	editor.focus();
+	return true;
+}
+
+export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
+	// Capture phase, so we run before anything inside the block (e.g. the animation player) can react to the click.
+	// We only take over when we positively identified the block and revealed its source; otherwise the click is
+	// left alone and Obsidian's own handler does the job.
+	plugin.registerDomEvent(document, 'click', (event: MouseEvent) => {
+		const button = (event.target as HTMLElement | null)?.closest<HTMLElement>(EDIT_BUTTON_SELECTOR);
+		if (!button) return;
+
+		const embedEl = button.closest<HTMLElement>('.cm-embed-block') ?? button.parentElement;
+		const wrapper = embedEl?.querySelector<HTMLElement>('.manim-block');
+		const target = wrapper ? editableBlockByWrapper.get(wrapper) : undefined;
 		if (!target) return;
 
-		event.preventDefault();
-		event.stopImmediatePropagation();
-		void openBlockInSourceMode(target);
+		if (revealBlockSource(plugin, target, embedEl)) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		}
 	}, true);
 
 	plugin.registerMarkdownCodeBlockProcessor('manim', (source, el, ctx) => {
-		const editableBlock: EditableBlock = { plugin, ctx, el };
 		const wrapper = el.createDiv({ cls: 'manim-block' });
-		editableBlockByContainer.set(wrapper, editableBlock);
-		let editableContainer: HTMLElement | null = wrapper.parentElement;
-		for (let depth = 0; editableContainer && depth < 6; depth++) {
-			editableBlockByContainer.set(editableContainer, editableBlock);
-			editableContainer = editableContainer.parentElement;
-		}
+		editableBlockByWrapper.set(wrapper, { ctx, el });
 		const blockKey = getBlockKey(ctx, el);
+
 		const header = wrapper.createDiv({ cls: 'manim-block-header' });
 		const controls = header.createDiv({ cls: 'manim-block-controls' });
 		const statusEl = controls.createSpan({ cls: 'manim-save-state' });
@@ -112,6 +141,7 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 		let executionCounter = 0;
 		let currentScene: ConstructableScene | null = null;
 		let unsubscribeSceneState: (() => void) | null = null;
+		let visibilityObserver: IntersectionObserver | null = null;
 		let unloaded = false;
 
 		const teardownScene = () => {
@@ -125,6 +155,7 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 			errorPanel.style.display = message ? 'block' : 'none';
 		};
 
+		/** `resumeTime`: where the previous run was, or null to start from the beginning. */
 		const execute = async (resumeTime: number | null) => {
 			pendingPlaybackTimeByBlock.delete(blockKey);
 			const executionId = ++executionCounter;
@@ -166,31 +197,39 @@ export function registerManimCodeBlockProcessor(plugin: ManimPlugin): void {
 				setRunState('running');
 				return;
 			}
-			void execute(pendingPlaybackTimeByBlock.get(blockKey) ?? currentScene?.getCurrentTime?.() ?? null);
+			// Idle: a fresh run. It only resumes mid-animation when this block was just re-rendered
+			// (pending time saved on unload); replaying a finished animation starts from the beginning.
+			void execute(pendingPlaybackTimeByBlock.get(blockKey) ?? null);
 		};
 		runButton.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); runOrPause(); });
 		restartButton.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void execute(null); });
 
-		ctx.addChild({
-			load: () => undefined,
-			onunload: () => {
-				const time = currentScene?.getCurrentTime?.();
-				if (time !== undefined && time > 0) pendingPlaybackTimeByBlock.set(blockKey, time);
-				unloaded = true;
-				executionCounter++;
-				teardownScene();
-			},
-		} as any);
+		// Obsidian calls `unload()` on every child component, so this must be a real component (a plain
+		// object without `unload` throws inside Obsidian's teardown and leaves the old widget behind).
+		const lifecycle = new MarkdownRenderChild(el);
+		lifecycle.register(() => {
+			const time = currentScene?.getCurrentTime?.();
+			if (time !== undefined && time > 0) pendingPlaybackTimeByBlock.set(blockKey, time);
+			unloaded = true;
+			executionCounter++;
+			visibilityObserver?.disconnect();
+			visibilityObserver = null;
+			teardownScene();
+		});
+		ctx.addChild(lifecycle);
 
-		if (plugin.settings.autoRun === 'always') void execute(null);
-		else if (plugin.settings.autoRun === 'visible') {
-			const observer = new IntersectionObserver((entries) => {
+		const autoRunTime = () => pendingPlaybackTimeByBlock.get(blockKey) ?? null;
+		if (plugin.settings.autoRun === 'always') {
+			void execute(autoRunTime());
+		} else if (plugin.settings.autoRun === 'visible') {
+			visibilityObserver = new IntersectionObserver((entries) => {
 				if (entries.some((entry) => entry.isIntersecting)) {
-					observer.disconnect();
-					void execute(null);
+					visibilityObserver?.disconnect();
+					visibilityObserver = null;
+					void execute(autoRunTime());
 				}
 			});
-			observer.observe(wrapper);
+			visibilityObserver.observe(wrapper);
 		}
 	});
 }

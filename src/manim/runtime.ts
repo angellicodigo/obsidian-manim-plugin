@@ -112,13 +112,13 @@ export async function runManimSource(
 		if (isSceneClass) {
 			const SceneClass = candidate as new (container: HTMLElement) => ConstructableScene;
 			const scene = new SceneClass(mount);
-			attachScenePauseController(scene);
+			attachScenePauseController(scene, mount);
 			onSceneReady?.(scene);
 			if (typeof scene.construct === 'function') await scene.construct();
 			return scene;
 		} else {
 			const scene = new (manimWeb.Scene as any)(mount) as ConstructableScene;
-			attachScenePauseController(scene);
+			attachScenePauseController(scene, mount);
 			onSceneReady?.(scene);
 			await (candidate as (scene: ConstructableScene) => Promise<void> | void)(scene);
 			return scene;

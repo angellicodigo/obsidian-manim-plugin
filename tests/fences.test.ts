@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-const OPENING_FENCE = /^\s*(`{3,}|~{3,})\s*manim\b/;
-const CLOSING_FENCE = /^\s*(`{3,}|~{3,})\s*$/;
+import { CLOSING_FENCE, OPENING_FENCE } from '../src/manim/fences';
 
 describe('fence regexes', () => {
 	it('matches opening fences', () => {

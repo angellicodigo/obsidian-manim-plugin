@@ -1,8 +1,12 @@
 import { safely } from './runtimeUtils';
 import type { ConstructableScene, SceneStateChange } from './runtime';
 
-/** Attach pause/resume/stop/dispose lifecycle hooks to a scene instance. */
-export function attachScenePauseController(scene: ConstructableScene): void {
+/**
+ * Attach pause/resume/stop/dispose lifecycle hooks to a scene instance.
+ * `container` is the scene's own mount element: slide-advance input is only honoured inside it, so clicks and
+ * key presses elsewhere in Obsidian (including the "Edit this block" button) never advance the animation.
+ */
+export function attachScenePauseController(scene: ConstructableScene, container: HTMLElement): void {
 	const rawScene = scene as any;
 	const originalPlay = typeof rawScene.play === 'function' ? rawScene.play.bind(rawScene) : null;
 	const originalPause = typeof rawScene.pause === 'function' ? rawScene.pause.bind(rawScene) : null;
@@ -14,6 +18,11 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 	let isDisposed = false;
 	const resumeWaiters: Array<() => void> = [];
 	let cancelActiveWait: (() => void) | null = null;
+	/** Pending nextSlide() waits; released (not advanced) when the scene is stopped or disposed. */
+	const slideWaitCancels = new Set<() => void>();
+	const cancelSlideWaits = (): void => {
+		for (const cancel of [...slideWaitCancels]) cancel();
+	};
 
 	const waitForResume = (): Promise<void> => {
 		if (!isPaused || isDisposed || rawScene._disposed) return Promise.resolve();
@@ -105,6 +114,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 	scene.stop = function(): void {
 		isPaused = false;
 		if (cancelActiveWait) { cancelActiveWait(); cancelActiveWait = null; }
+		cancelSlideWaits();
 		triggerResume();
 		safely(() => originalStop?.());
 	};
@@ -114,6 +124,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		isDisposed = true;
 		isPaused = false;
 		if (cancelActiveWait) { cancelActiveWait(); cancelActiveWait = null; }
+		cancelSlideWaits();
 		triggerResume();
 		safely(() => originalDispose?.());
 	};
@@ -122,6 +133,7 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		rawScene._waitCleanups.push(() => {
 			isDisposed = true;
 			if (cancelActiveWait) { cancelActiveWait(); cancelActiveWait = null; }
+			cancelSlideWaits();
 			triggerResume();
 		});
 	}
@@ -167,22 +179,27 @@ export function attachScenePauseController(scene: ConstructableScene): void {
 		(scene as any).nextSlide = async function(opts: any = {}): Promise<void> {
 			if (opts && opts.autoNext) return;
 			return new Promise<void>((resolve) => {
+				const isActive = () => container.matches(':hover') || container.contains(document.activeElement);
 				const onKeyDown = (e: KeyboardEvent) => {
-					if (isEditableElement(e.target as HTMLElement | null)) return;
+					if (isEditableElement(e.target as HTMLElement | null) || !isActive()) return;
 					if (['Space', 'ArrowRight', 'Enter', 'PageDown'].includes(e.code)) {
 						e.preventDefault(); cleanup(); resolve();
 					}
 				};
 				const onClick = (e: MouseEvent) => {
-					if ((e.target as HTMLElement)?.closest('.manim-block-header')) return;
+					const target = e.target as HTMLElement | null;
+					if (!target || !container.contains(target)) return;
 					cleanup(); resolve();
 				};
 				const cleanup = () => {
 					window.removeEventListener('keydown', onKeyDown, true);
-					window.removeEventListener('click', onClick, true);
+					container.removeEventListener('click', onClick);
+					slideWaitCancels.delete(cancelWait);
 				};
+				const cancelWait = () => { cleanup(); resolve(); };
+				slideWaitCancels.add(cancelWait);
 				window.addEventListener('keydown', onKeyDown, true);
-				window.addEventListener('click', onClick, true);
+				container.addEventListener('click', onClick);
 			});
 		};
 		(scene as any).next_slide = (scene as any).nextSlide;
